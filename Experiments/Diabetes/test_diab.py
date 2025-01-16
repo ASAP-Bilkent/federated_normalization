@@ -316,9 +316,9 @@ def get_results(global_weights):
     y_pred = model.predict(X_test_fed)
     y_pred = (y_pred.flatten() >= 0.5).astype(int)
     
-    f1 = f1_score(Y_test_fed, y_pred)
-    precision = precision_score(Y_test_fed, y_pred)
-    recall = recall_score(Y_test_fed, y_pred)
+    f1 = f1_score(Y_val_fed, y_pred, average="weighted", zero_division=1)
+    precision = precision_score(Y_test_fed, y_pred, average="weighted")
+    recall = recall_score(Y_test_fed, y_pred, average="weighted")
     
     return test_accuracy, test_loss, f1, precision, recall
 
