@@ -37,6 +37,7 @@ func main() {
 	// Number of parties
 	N := 4
 	NFeatures := 4
+	Percentile := 50.0
 
 	// Create each party and their secret keys
 	parties := GenRobustParties(params, N, NFeatures)
@@ -92,14 +93,24 @@ func main() {
 
 	// Finding the median's index for each feature, this can be changed to %75 or %25 for other robust scaling values
 	k := make([]int64, NFeatures)
+	isValidIndex := make([]bool, NFeatures)
 	for i := 0; i < NFeatures; i++ {
 		// Dividing the number of samples by 2 to find median index
-		k[i] = ceilDiv(intNoOfSamplesValues[i], 2)
+		tempK := 1 + float64(Percentile / 100.0) * float64(intNoOfSamplesValues[i] - 1)
+		
+		if tempK == math.Floor(tempK){
+			k[i] = int64(tempK)
+			isValidIndex[i] = true
+		} else {
+			k[i] = int64(math.Floor(tempK))
+			isValidIndex[i] = false
+		}
+
 	}
 
 	// Finding the medians
 	fmt.Printf("\nFinding the median... \n")
-	results := findKthElement(params, pk, evk, k, NFeatures, globalMin, globalMax, epsilon, intNoOfSamplesValues, parties)
+	results := findKthElement(params, pk, evk, k, NFeatures, globalMin, globalMax, epsilon, intNoOfSamplesValues, parties, isValidIndex)
 
 	fmt.Printf("\n")
 	fmt.Printf("Results: \n")
@@ -133,7 +144,7 @@ func encryptedSum(params ckks.Parameters, evk rlwe.EvaluationKeySet, inputCipher
 	return sum
 }
 
-func findKthElement(params ckks.Parameters, pk *rlwe.PublicKey, evk rlwe.EvaluationKeySet, k []int64, NFeatures int, min []float64, max []float64, epsilon []float64, totalNoSamples []int64, parties []*Party) (result []float64){
+func findKthElement(params ckks.Parameters, pk *rlwe.PublicKey, evk rlwe.EvaluationKeySet, k []int64, NFeatures int, min []float64, max []float64, epsilon []float64, totalNoSamples []int64, parties []*Party, isValidIndex []bool) (result []float64){
 
 	// This array is used to check if we have found the k-th element for each feature
 	checkEveryFeature := make([]bool, NFeatures)
@@ -159,18 +170,16 @@ func findKthElement(params ckks.Parameters, pk *rlwe.PublicKey, evk rlwe.Evaluat
 			m[i] = (a[i] + b[i]) / 2.0
 		}
 
+		// Count elements smaller and greater than midpoint in all parties for every feature in one communication round
+		lCount, gCount := communicationRound(params, pk, parties, m, NFeatures, evk)
+
 		for i := 0; i < NFeatures; i++ {
 			if checkEveryFeature[i] {
 				continue
 			}
 
-
-			// Count elements smaller and greater than midpoint in all parties for every feature in one communication round
-			lCount, gCount := communicationRound(params, pk, parties, m, NFeatures, evk)
-
-
-			// Check if interested index (k) is a valid index or average of two elements, this feature can be disabled.
-			if totalNoSamples[i] % k[i] == 0 {
+			// // Check if interested index (k) is a valid index or average of two elements, this feature can be disabled.
+			if !isValidIndex[i] {
 				// Check if m is the kth element for feature i
 				// In this part, we want to find the element that is between two elements since k is not a valid index (like finding median (k=5) for 10)
 				if lCount[i] <= k[i] && gCount[i] <= totalNoSamples[i]-k[i] {
@@ -279,10 +288,6 @@ func calculatePartysCounts(parties []*Party, m []float64, NFeatures int) {
 		}
 	}
 
-}
-
-func ceilDiv(x, y int64) int64 {
-	return (x + y - 1) / y
 }
 
 func allTrue(arr []bool) bool {

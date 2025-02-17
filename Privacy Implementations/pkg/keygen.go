@@ -162,9 +162,9 @@ func RelinearizationKeyGeneration(params ckks.Parameters, crs sampling.PRNG, P [
 // 	return galKeys
 // }
 
-func Gkgphase2(params ckks.Parameters, crs sampling.PRNG, P []*Party) (galKeys *rlwe.GaloisKey) {
+func Gkgphase2(params ckks.Parameters, crs sampling.PRNG, P []*Party, N int) (galKeys *rlwe.GaloisKey) {
 	
-	gkg := make([]multiparty.GaloisKeyGenProtocol, 4)
+	gkg := make([]multiparty.GaloisKeyGenProtocol, N)
 	for i := range gkg {
 		if i == 0 {
 			gkg[i] = multiparty.NewGaloisKeyGenProtocol(params)

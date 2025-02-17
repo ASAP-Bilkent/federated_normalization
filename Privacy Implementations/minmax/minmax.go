@@ -36,7 +36,7 @@ func main() {
 	}
 
 	// Number of parties
-	N := 4
+	N := 10
 
 	// Create each party and their secret keys
 	parties := GenMinMaxParties(params, N)
@@ -53,7 +53,7 @@ func main() {
 	rlk := RelinearizationKeyGeneration(params, crs, parties)
 
 	// Collective GaloisKeys generation
-	galKeys := Gkgphase2(params, crs, parties)
+	galKeys := Gkgphase2(params, crs, parties, N)
 
 	// Evaluation Key
 	evk := rlwe.NewMemEvaluationKeySet(rlk, galKeys) 
@@ -149,7 +149,10 @@ func findMinMax(params ckks.Parameters, minCiphertexts []*rlwe.Ciphertext, maxCi
 				panic(err)
 			}
 		}
+		min, _ = btp.Bootstrap(min)
 	}
+
+	// fmt.Printf("Minim Level %d \n", min.Level())
 
 	fmt.Printf("\n")
 	fmt.Printf("Finding the Max... \n")
@@ -166,6 +169,10 @@ func findMinMax(params ckks.Parameters, minCiphertexts []*rlwe.Ciphertext, maxCi
 		}
 		max, _ = btp.Bootstrap(max)
 	}
+
+	min, _ = btp.Bootstrap(min)
+	max, _ = btp.Bootstrap(max)
+	// fmt.Printf("Maxim Level %d \n", max.Level())
 
 
 	// Renormalizing the min and max values
