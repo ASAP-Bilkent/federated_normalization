@@ -14,8 +14,8 @@ This directory includes the code used to run the experiments. Each dataset has i
 
 **Notes:**
 - You may need to adjust several variables in the code, such as:
-  - Weights & Biases project name
-  - API login credentials
+  - Weights & Biases project creation and changing the project name in the code
+  - Weights & Biases API login credentials
   - Dataset paths
 - Datasets are **not** included in this repository. Please download them from their official sources and update the dataset path variables in the code accordingly.
 - A `requirements.yml` file is provided to set up the Python environment. You can create a conda environment using:
