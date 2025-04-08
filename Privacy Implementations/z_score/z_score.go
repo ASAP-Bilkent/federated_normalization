@@ -15,21 +15,21 @@ import (
 
 
 func main() {
+
 	// Set encryption parameters for CKKS
 	var err error
 	var params ckks.Parameters
 
-	// 128-bit secure parameters enabling depth-7 circuits.
-	// LogN:14, LogQP: 431.
 	if params, err = ckks.NewParametersFromLiteral(
 		ckks.ParametersLiteral{
-			LogN:            14,                                    // log2(ring degree)
-			LogQ:            []int{55, 45, 45, 45, 45, 45, 45, 45}, // log2(primes Q) (ciphertext modulus)
-			LogP:            []int{61},                             // log2(primes P) (auxiliary modulus)
+			LogN: 15,                                     			  				 // log2(ring degree)
+			LogQ: []int{55, 45, 45, 45, 45, 45, 45, 45, 45, 45, 45, 45, 45, 45, 45}, // log2(primes Q) (ciphertext modulus)
+			LogP:            []int{61},                             				 // log2(primes P) (auxiliary modulus)
 			LogDefaultScale: 45,
 		}); err != nil {
 		panic(err)
 	}
+
 
 	crs, err := sampling.NewKeyedPRNG([]byte{'l', 'a', 't', 't', 'i', 'g', 'o'})
 	if err != nil {
@@ -78,20 +78,13 @@ func main() {
 
 	// Decrypting the mean for client side operations
 	tsk, tpk := rlwe.NewKeyGenerator(params).GenKeyPairNew()
+	
 	meanValues := CollectiveDecryption(params, tsk, mean, tpk, parties)
 
 	// Client Side partially summation by using mean sum(for i in range Kj -> (Xi - mean)^2), K is number of data points for Client j
 	// Each slot in party[j].TempVarianceSum represents the sum of (Xi - mean)^2 for that feature for client j
 	// Each slot in partialSumsCiphertexts[j] represents the encryption of sum of (Xi - mean)^2 for that feature for client j
 	partialSumsCiphertexts := clientSidePartialSums(params, meanValues, parties, pk)
-
-	fmt.Printf("\n")
-	fmt.Printf("Test partialSumsCiphertexts: \n")
-	for i := range parties {
-		fmt.Printf("Party %d\n", i)
-		fmt.Printf("Partial Sum: ")
-		TestCollectiveDecryption(params, partialSumsCiphertexts[i], parties)
-	}
 
 	
 	// 5) Homomorphic operations for variance calculation
@@ -115,6 +108,7 @@ func main() {
 
 	fmt.Printf("Variance: ")
 	PrintValues(varianceValues)
+
 }
 
 
@@ -138,9 +132,13 @@ func average(params ckks.Parameters, inputCiphertexts []*rlwe.Ciphertext, number
 
 	// Summing the inputs
 	sumInputs := inputCiphertexts[0].CopyNew()
+	
 	for i := 1; i < len(inputCiphertexts); i++ {
+		
 		eval.Add(sumInputs, inputCiphertexts[i], sumInputs)
+
 	}
+
 
 	// Summing the no of samples
 	sumNoOfSamples := numberOfSamplesCiphertexts[0].CopyNew()
@@ -152,29 +150,22 @@ func average(params ckks.Parameters, inputCiphertexts []*rlwe.Ciphertext, number
 	logmin := -30.0
 	logmax := 30.0
 	var noSamplesInverse *rlwe.Ciphertext
+	
 	if noSamplesInverse, err = invEval.EvaluatePositiveDomainNew(sumNoOfSamples, logmin, logmax); err != nil {
 		panic(err)
 	}
 
-	//// fmt.Printf("Level of noSamplesInverse: %d \n", noSamplesInverse.Level())
+
 
 	// Bootstrapping the result of inverse
 	if noSamplesInverse, err = btp.Bootstrap(noSamplesInverse); err != nil {
 		panic(err)
 	}
 
-	//// fmt.Printf("Level of noSamplesInverse: %d \n", noSamplesInverse.Level())
-	//// fmt.Printf("Level of sumInputs: %d \n", sumInputs.Level())
-
-	fmt.Printf("sumInputs:\n")
-	TestCollectiveDecryption(params, sumInputs, parties)
-	fmt.Printf("sumNoOfSamples:\n")
-	TestCollectiveDecryption(params, sumNoOfSamples, parties)
-	fmt.Printf("noSamplesInverse:\n")
-	TestCollectiveDecryption(params, noSamplesInverse, parties)
 
 	// Multiply
 	var average *rlwe.Ciphertext
+
 	average, err = eval.MulRelinNew(sumInputs, noSamplesInverse)
 	if err != nil {
 		panic(err)
@@ -182,8 +173,6 @@ func average(params ckks.Parameters, inputCiphertexts []*rlwe.Ciphertext, number
 	if err = eval.Rescale(average, average); err != nil {
 		panic(err)
 	}
-
-	//// fmt.Printf("Level of average: %d \n", average.Level())
 
 	return average, noSamplesInverse
 }
@@ -206,11 +195,10 @@ func variance(params ckks.Parameters, partialSumsCiphertexts []*rlwe.Ciphertext,
 		eval.Add(totalSum, partialSumsCiphertexts[i], totalSum)
 	}
 
-	fmt.Printf("Total Sum for Variance: \n")
-	TestCollectiveDecryption(params, totalSum, parties)
 
 	// Multiply --- variance = 1/N * totalSum
 	var variance *rlwe.Ciphertext
+	
 	variance, err = eval.MulRelinNew(totalSum, noOfSamplesInverse)
 	if err != nil {
 		panic(err)
@@ -218,6 +206,7 @@ func variance(params ckks.Parameters, partialSumsCiphertexts []*rlwe.Ciphertext,
 	if err = eval.Rescale(variance, variance); err != nil {
 		panic(err)
 	}
+
 	
 	return variance
 }

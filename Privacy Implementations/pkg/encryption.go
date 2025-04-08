@@ -7,7 +7,6 @@ import (
 	"github.com/tuneinsight/lattigo/v6/schemes/ckks"
 )
 
-// TODO: Will be import later for time calculation
 var elapsedEncryptParty time.Duration
 var elapsedEncryptCloud time.Duration
 
@@ -53,6 +52,7 @@ func EncryptMinMaxValues(params ckks.Parameters, pk *rlwe.PublicKey, parties []*
 
 	maxCiphertexts := make([]*rlwe.Ciphertext, len(parties))
 	for i, pi := range parties {
+		
 		plaintext := ckks.NewPlaintext(params, params.MaxLevel())
 
 		var err error
@@ -62,6 +62,7 @@ func EncryptMinMaxValues(params ckks.Parameters, pk *rlwe.PublicKey, parties []*
 		if maxCiphertexts[i], err = encryptor.EncryptNew(plaintext); err != nil {
 			panic(err)
 		}
+
 	}
 
 	minCiphertexts := make([]*rlwe.Ciphertext, len(parties))

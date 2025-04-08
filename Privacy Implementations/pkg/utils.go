@@ -92,7 +92,7 @@ func PrintRobustPartyInputs(parties []*Party) {
 
 		for i := 0; i < len(pi.RobustScalingInput); i++ {
 			for j := 0; j < len(pi.RobustScalingInput[i]); j++ {
-				fmt.Printf("%2.2f ", float64(pi.RobustScalingInput[i][j]))
+				fmt.Printf("%2.8f ", float64(pi.RobustScalingInput[i][j]))
 			}
 			fmt.Printf("\n")
 		}

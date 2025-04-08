@@ -7,7 +7,6 @@ import (
 	"github.com/tuneinsight/lattigo/v6/multiparty"
 	"github.com/tuneinsight/lattigo/v6/multiparty/mpckks"
 	"github.com/tuneinsight/lattigo/v6/schemes/ckks"
-	//"math/rand"
 )
 
 type Party struct {
@@ -19,7 +18,7 @@ type Party struct {
 	gkgShare    multiparty.GaloisKeyGenShare
 	rkgShareOne  multiparty.RelinearizationKeyGenShare
 	rkgShareTwo  multiparty.RelinearizationKeyGenShare
-	//cksShare     multiparty.KeySwitchShare
+
 	pcksShare    multiparty.PublicKeySwitchShare
 	refreshShare multiparty.RefreshShare
 
@@ -34,7 +33,6 @@ type Party struct {
 	RobustScalingLCount []float64
 	RobustScalingRCount []float64
 
-	//decryptionShare *rlwe.Plaintext // Add this field
 }
 
 // Generates parties and their secret keys for z score computation
@@ -45,6 +43,7 @@ func GenZscoreParties(params ckks.Parameters, N int) []*Party {
 	for i := 0; i < N; i++ {
 		pi := &Party{}
 		pi.Sk = kgen.GenSecretKeyNew() // Generate secret key for each party
+
 
 		pi.Input = make([]float64, params.MaxSlots())
 		for j := range pi.Input {
@@ -80,12 +79,12 @@ func GenMinMaxParties(params ckks.Parameters, N int) []*Party {
     
 	for i := 0; i < N; i++ {
 		pi := &Party{}
+
 		pi.Sk = kgen.GenSecretKeyNew() // Generate secret key for each party
 
 		pi.MinValues = make([]float64, params.MaxSlots())
 		for j := range pi.MinValues {
-			//pi.MinValues[j] = -5.0 * float64(i+1) + 10 // Each party holds a float64 value for Input (e.g., 10.0, 20.0) for all slots
-			//random float64 value dependent on j
+
 			if j % 2 == 0 {
 				pi.MinValues[j] = min2 + rand.Float64()*(max2-min2)
 			} else{
@@ -103,11 +102,6 @@ func GenMinMaxParties(params ckks.Parameters, N int) []*Party {
 			} else{
 				pi.MaxValues[j] = min1 + rand.Float64()*(max1-min1)
 			}
-			// if j < 4 {
-			// 	pi.MaxValues[j] = -100.0 * float64(i+1) // Each party holds a float64 value NumberOfSamples (e.g., 2.0, 4.0) for all slots
-			// } else{
-			// 	pi.MaxValues[j] = -100.0 * float64(i+1)
-			// }
 		}
 
 		parties[i] = pi

@@ -10,7 +10,6 @@ import tensorflow as tf
 
 from flwr.simulation.ray_transport.utils import enable_tf_gpu_growth
 
-#os.environ["CUDA_VISIBLE_DEVICES"]="0,1"
 enable_tf_gpu_growth()
 
 """# Global Constants (Dataset Specific)"""
@@ -920,7 +919,7 @@ parameters_dict.update({
     })
 
 sweep_id = wandb.sweep(sweep_config, project="mnist") # to start a new sweep
-#sweep_id = "" # to continue a sweep
+
 import time
 
 def train(config = None):
@@ -1027,4 +1026,3 @@ def train(config = None):
 
 
 wandb.agent(sweep_id, train) # to start a new sweep
-#wandb.agent(sweep_id, project="mnist", function=train) # to continue a sweep

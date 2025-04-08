@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"time"
 
 	"github.com/tuneinsight/lattigo/v6/core/rlwe"
 	"github.com/tuneinsight/lattigo/v6/schemes/ckks"
@@ -13,21 +14,21 @@ import (
 
 
 func main() {
+	
 	// Set encryption parameters for CKKS
 	var err error
 	var params ckks.Parameters
 
-	// 128-bit secure parameters enabling depth-7 circuits.
-	// LogN:14, LogQP: 431.
 	if params, err = ckks.NewParametersFromLiteral(
 		ckks.ParametersLiteral{
-			LogN:            14,                                    // log2(ring degree)
-			LogQ:            []int{55, 45, 45, 45, 45, 45, 45, 45}, // log2(primes Q) (ciphertext modulus)
-			LogP:            []int{61},                             // log2(primes P) (auxiliary modulus)
+			LogN: 15,                                     			  				 // log2(ring degree)
+			LogQ: []int{55, 45, 45, 45, 45, 45, 45, 45, 45, 45, 45, 45, 45, 45, 45}, // log2(primes Q) (ciphertext modulus)
+			LogP:            []int{61},                             				 // log2(primes P) (auxiliary modulus)
 			LogDefaultScale: 45,
 		}); err != nil {
 		panic(err)
 	}
+
 
 	crs, err := sampling.NewKeyedPRNG([]byte{'l', 'a', 't', 't', 'i', 'g', 'o'})
 	if err != nil {
@@ -87,7 +88,7 @@ func main() {
 	for i := 0; i < NFeatures; i++ {
 		globalMin[i] = -2.0
 		globalMax[i] = 2.0
-		epsilon[i] = 0.0001
+		epsilon[i] = 0.000001
 	}
 
 
@@ -108,15 +109,21 @@ func main() {
 
 	}
 
-	// Finding the medians
-	fmt.Printf("\nFinding the median... \n")
+	// Finding the medians 
+	start := time.Now()
+	fmt.Printf("\nFinding the k-th element... \n")
 	results := findKthElement(params, pk, evk, k, NFeatures, globalMin, globalMax, epsilon, intNoOfSamplesValues, parties, isValidIndex)
 
 	fmt.Printf("\n")
 	fmt.Printf("Results: \n")
 	for i := 0; i < NFeatures; i++ {
-		fmt.Printf("%.5f ", results[i])
+		fmt.Printf("%2.8f ", results[i])
 	}
+	timeCalculated := time.Since(start)
+	fmt.Printf("\n")
+	fmt.Printf("%s\n", timeCalculated)
+
+
 	fmt.Printf("\n")
 	fmt.Printf("\n")
 	fmt.Printf("Validation:")
@@ -125,9 +132,10 @@ func main() {
 		fmt.Printf("\n")
 		fmt.Printf("Feature %d: \n", i)
 		for _, val := range validationResults[i] {
-			fmt.Printf("%.5f ", val)
+			fmt.Printf("%2.8f ", val)
 		}
 	}
+
 
 }
 
@@ -183,7 +191,7 @@ func findKthElement(params ckks.Parameters, pk *rlwe.PublicKey, evk rlwe.Evaluat
 				// Check if m is the kth element for feature i
 				// In this part, we want to find the element that is between two elements since k is not a valid index (like finding median (k=5) for 10)
 				if lCount[i] <= k[i] && gCount[i] <= totalNoSamples[i]-k[i] {
-					fmt.Printf("The %d-th ranked element for feature %d is: %.5f\n", k[i], i, m[i])
+					fmt.Printf("The %d-th ranked element for feature %d is: %2.8f\n", k[i], i, m[i])
 					results[i] = m[i]
 					checkEveryFeature[i] = true
 					continue
@@ -199,7 +207,7 @@ func findKthElement(params ckks.Parameters, pk *rlwe.PublicKey, evk rlwe.Evaluat
 				// This is a computation limit, epsilon is defined based on the application's needs
 				if b[i]-a[i] <= epsilon[i] {
 					results[i] = (a[i]+b[i])/2.0
-					fmt.Printf("*The %d-th ranked element for feature %d is: %.5f\n", k[i], i, m[i])
+					fmt.Printf("*The %d-th ranked element for feature %d is: %2.8f\n", k[i], i, m[i])
 					checkEveryFeature[i] = true
 				}
 
@@ -207,7 +215,7 @@ func findKthElement(params ckks.Parameters, pk *rlwe.PublicKey, evk rlwe.Evaluat
 				// Check if m is the kth element for feature i
 				// Only difference in this is we look at k-1 instead of k, because k is a valid index, we want to find the exact k-th element (like finding median (k=5) for 9)
 				if lCount[i] <= k[i]-1 && gCount[i] <= totalNoSamples[i]-k[i] {
-					fmt.Printf("The %d-th ranked element for feature %d is: %.5f\n", k[i], i, m[i])
+					fmt.Printf("The %d-th ranked element for feature %d is: %2.8f\n", k[i], i, m[i])
 					results[i] = m[i]
 					checkEveryFeature[i] = true
 					continue
@@ -223,7 +231,7 @@ func findKthElement(params ckks.Parameters, pk *rlwe.PublicKey, evk rlwe.Evaluat
 				// This is a computation limit, epsilon is defined based on the application's needs
 				if b[i]-a[i] <= epsilon[i] {
 					results[i] = (a[i]+b[i])/2.0
-					fmt.Printf("*The %d-th ranked element for feature %d is: %.5f\n", k[i], i, m[i])
+					fmt.Printf("*The %d-th ranked element for feature %d is: %2.8f\n", k[i], i, m[i])
 					checkEveryFeature[i] = true
 				}				
 			}

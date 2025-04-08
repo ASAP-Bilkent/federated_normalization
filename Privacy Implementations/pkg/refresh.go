@@ -81,9 +81,6 @@ func (refresher Refresher) RefreshProtocol(params ckks.Parameters, crs sampling.
 
 	minLevel, logBound, ok := mpckks.GetMinimumLevelForRefresh(128, params.DefaultScale(), N, params.Q())
 	if ok {
-		//var DefaultXe = ring.DiscreteGaussian{Sigma: 3.2, Bound: 19.2}
-		//fmt.Printf("Minimum Level: %d\n", minLevel)
-		// we can add counter here
 		for i, pi := range P {
 
 			var err error
@@ -114,7 +111,6 @@ func (refresher Refresher) RefreshProtocol(params ckks.Parameters, crs sampling.
 
 		return encOut, nil
 	} else {
-		//fmt.Printf("refresh error: not enough level to ensure correctness and 128 bit security")
 		return nil, fmt.Errorf("refresh error: not enough level to ensure correctness and 128 bit security")
 	}
 

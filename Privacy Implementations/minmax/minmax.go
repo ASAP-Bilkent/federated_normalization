@@ -14,11 +14,11 @@ import (
 
 
 func main() {
+
 	// Set encryption parameters for CKKS
 	var err error
 	var params ckks.Parameters
 
-	// 128-bit secure parameters enabling depth-14 circuits.
 	// LogN:15
 	if params, err = ckks.NewParametersFromLiteral(
 		ckks.ParametersLiteral{
@@ -29,6 +29,7 @@ func main() {
 		}); err != nil {
 		panic(err)
 	}
+	
 
 	crs, err := sampling.NewKeyedPRNG([]byte{'l', 'a', 't', 't', 'i', 'g', 'o'})
 	if err != nil {
@@ -36,7 +37,7 @@ func main() {
 	}
 
 	// Number of parties
-	N := 10
+	N := 4
 
 	// Create each party and their secret keys
 	parties := GenMinMaxParties(params, N)
@@ -47,22 +48,25 @@ func main() {
 	// 1) Collective key generations
 
 	// Collective Public Key
+	
 	pk := CollectiveKeyGen(params, crs, parties)
 
+
 	// Collective Relinearization Key
+	
 	rlk := RelinearizationKeyGeneration(params, crs, parties)
 
+
 	// Collective GaloisKeys generation
+	
 	galKeys := Gkgphase2(params, crs, parties, N)
+
 
 	// Evaluation Key
 	evk := rlwe.NewMemEvaluationKeySet(rlk, galKeys) 
 
 	// Refresh Protocol (instance of bootstrapping.Bootstrapper)
 	refresher := NewRefresher(params, parties, crs, N)
-
-	fmt.Printf("Min Level %d \n", refresher.MinimumInputLevel())
-	fmt.Printf("Max Level %d \n", params.MaxLevel())
 
 	// 2) Encryption of each party's float64 values
 	minCiphertexts, maxCiphertexts := EncryptMinMaxValues(params, pk, parties)
@@ -74,6 +78,7 @@ func main() {
 	TestCollectiveDecryption(params, minResults, parties)
 	fmt.Printf("Max Result: \n")
 	TestCollectiveDecryption(params, maxResults, parties)
+
 
 }
 
@@ -144,15 +149,16 @@ func findMinMax(params ckks.Parameters, minCiphertexts []*rlwe.Ciphertext, maxCi
 		if i == 0 {
 			min = minCiphertextsNormalized[i].CopyNew()
 		} else {
+			
 			min, err = CmpEval.Min(min, minCiphertextsNormalized[i])
 			if err != nil {
 				panic(err)
 			}
+
 		}
 		min, _ = btp.Bootstrap(min)
 	}
-
-	// fmt.Printf("Minim Level %d \n", min.Level())
+	
 
 	fmt.Printf("\n")
 	fmt.Printf("Finding the Max... \n")
@@ -162,17 +168,23 @@ func findMinMax(params ckks.Parameters, minCiphertexts []*rlwe.Ciphertext, maxCi
 		if i == 0 {
 			max = maxCipherTextsNormalized[i].CopyNew()
 		} else {
+			
 			max, err = CmpEval.Max(max, maxCipherTextsNormalized[i])
 			if err != nil {
 				panic(err)
 			}
+
+
 		}
+		
 		max, _ = btp.Bootstrap(max)
+
 	}
+	
 
 	min, _ = btp.Bootstrap(min)
+
 	max, _ = btp.Bootstrap(max)
-	// fmt.Printf("Maxim Level %d \n", max.Level())
 
 
 	// Renormalizing the min and max values
