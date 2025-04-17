@@ -1,77 +1,75 @@
-import flwr as fl
-from flwr.common import Metrics
-from flwr.common.typing import Scalar
-from collections import OrderedDict
-from typing import List, Tuple, Dict, Optional
-
-from norms import *
-from utils import *
-
+import numpy as np
+import argparse
 import numpy as np
 import csv
 import tensorflow as tf
+import wandb
+import time
+import math
+import gc
+import pandas as pd
+import sys
+import os
 
-from flwr.simulation.ray_transport.utils import enable_tf_gpu_growth
+from norms import *
+from utils import *
 from skew import *
 
-#os.environ["CUDA_VISIBLE_DEVICES"]="0,1"
-enable_tf_gpu_growth()
+from sklearn.utils import resample
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import f1_score, precision_score, recall_score, classification_report
 
+from keras.utils import to_categorical
+import pandas as pd
 
 """# Global Constants (Dataset Specific)"""
 # global variables
 BATCH_SIZE = 8
 EPOCH = 150
 LEARNING_RATE = 0.001
-NORMALIZATION_LAYER = ''
-NUM_CLIENTS = 10
-#NORMALIZATION_TYPE = ''
+NORMALIZATION_LAYER = ""
 EARLY_STOPPING_PATIENCE = 7
-DATASET_INPUT_SHAPE = (12,1)
-IS_IMAGE_DATA = False
-PROJECT_NAME  = ""
+DATASET_INPUT_SHAPE = 12
 
-X_trains_fed = np.zeros(1)
-Y_trains_fed = np.zeros(1)
-X_test_fed = np.zeros(1) # test sets are not actually splitted but we use it as a variable array
-Y_test_fed = np.zeros(1)
-X_val_fed = np.zeros(1)
-Y_val_fed = np.zeros(1)
+
+def initialize_globals():
+    global X_trains_fed, Y_trains_fed, X_test_fed, Y_test_fed, X_val_fed, Y_val_fed
+    global global_weights, best_f1, best_acc, weights, best_loss
+
+    # Dataset-related globals
+    X_trains_fed = np.zeros((1,))
+    Y_trains_fed = np.zeros((1,))
+    X_test_fed = np.zeros((1,))
+    Y_test_fed = np.zeros((1,))
+    X_val_fed = np.zeros((1,))
+    Y_val_fed = np.zeros((1,))
+
+    # Model-related globals
+    global_weights = np.zeros((1,))
+    best_f1 = 0.0
+    best_acc = 0.0
+    weights = np.array([])
+    best_loss = float("inf")
 
 
 """# Dataset Retrieval"""
 
-from sklearn.model_selection import train_test_split
 
 def load_data(data_dir=""):
-    def load_X(filepath):
-        with open(filepath, mode='r') as file:
-            reader = csv.reader(file)
-            next(reader)  # Skip the header
-            X = [list(map(float, row[1:])) for row in reader]  # Convert data to floats
-        return X
-
-    # Function to load Y data from CSV without Pandas
-    def load_Y(filepath):
-        with open(filepath, mode='r') as file:
-            reader = csv.reader(file)
-            next(reader)  # Skip the header
-            Y = [int(row[1]) for row in reader]  # Convert data to int (assuming one column)
-        return Y
 
     # Load the processed data
-    X = load_X(f"processed_X.csv")
-    Y = load_Y(f"processed_Y.csv")
-    
+    X = pd.read_csv("x.csv")
+    Y = pd.read_csv(f"y.csv")
     
     X = np.array(X)
     Y = np.array(Y)
+    Y = to_categorical(Y, 5)
 
 
     # Split data into training, testing, and validation sets
     x_train, x_test, y_train, y_test = train_test_split(X, Y, test_size=0.2, shuffle=True, random_state=42)
     x_train, x_vals, y_train, y_vals = train_test_split(x_train, y_train, test_size=0.1, random_state=42)
-
+        
     global X_trains_fed
     global Y_trains_fed
     global X_test_fed
@@ -86,73 +84,92 @@ def load_data(data_dir=""):
     X_val_fed = x_vals
     Y_val_fed = y_vals
 
+
     return
 
 
 def do_skew(skew_type, num_clients, X_data, Y_data):
-    if(skew_type == 'feature_0.3'):
-      clientsData, clientsDataLabels = feature_skew_dist(X_data,  Y_data,num_clients, sigma = 0.3, batch_size=BATCH_SIZE)
-    elif(skew_type == 'feature_0.7'):
-      clientsData, clientsDataLabels = feature_skew_dist(X_data,  Y_data,num_clients, sigma = 0.7, batch_size=BATCH_SIZE)
-    elif(skew_type == 'label_5.0'):
-      clientsData, clientsDataLabels = label_skew_dist(X_data,  Y_data,num_clients, 2, beta = 5, batch_size=BATCH_SIZE)
-    elif(skew_type == 'label_0.5'):
-      clientsData, clientsDataLabels = label_skew_dist(X_data,  Y_data,num_clients, 2, beta = 0.5, batch_size=BATCH_SIZE)
-    elif(skew_type == 'quantity_5.0'):
-      clientsData, clientsDataLabels = qty_skew_dist(X_data,  Y_data,num_clients, beta = 5, batch_size=BATCH_SIZE)
-    elif(skew_type == 'quantity_0.7'):
-      clientsData, clientsDataLabels = qty_skew_dist(X_data,  Y_data,num_clients, beta = 0.7, batch_size=BATCH_SIZE)
-    elif(skew_type == 'default'):
-        clientsData, clientsDataLabels = iid_dist(X_data, Y_data, num_clients, batch_size=BATCH_SIZE)
+    if skew_type == "feature_0.3":
+        clientsData, clientsDataLabels = feature_skew_dist(
+            X_data, Y_data, num_clients, sigma=0.3, batch_size=BATCH_SIZE
+        )
+    elif skew_type == "feature_0.7":
+        clientsData, clientsDataLabels = feature_skew_dist(
+            X_data, Y_data, num_clients, sigma=0.7, batch_size=BATCH_SIZE
+        )
+    elif skew_type == "label_5.0":
+        clientsData, clientsDataLabels = label_skew_dist(
+            X_data, Y_data, num_clients, 2, beta=5, batch_size=BATCH_SIZE
+        )
+    elif skew_type == "label_0.5":
+        clientsData, clientsDataLabels = label_skew_dist(
+            X_data, Y_data, num_clients, 2, beta=0.5, batch_size=BATCH_SIZE
+        )
+    elif skew_type == "quantity_5.0":
+        clientsData, clientsDataLabels = qty_skew_dist(
+            X_data, Y_data, num_clients, beta=5, batch_size=BATCH_SIZE
+        )
+    elif skew_type == "quantity_0.7":
+        clientsData, clientsDataLabels = qty_skew_dist(
+            X_data, Y_data, num_clients, beta=0.7, batch_size=BATCH_SIZE
+        )
+    elif skew_type == "default":
+        clientsData, clientsDataLabels = iid_dist(
+            X_data, Y_data, num_clients, batch_size=BATCH_SIZE
+        )
     else:
-        print('error')
-
-
+        print("error")
 
     return clientsData, clientsDataLabels
 
+
 """# Normalization Methods"""
 
-def do_normalization(normalization_type, num_clients, X_data, val_x, test_x, Y_data, val_y, test_y):
+
+def do_normalization(
+    normalization_type, num_clients, X_data, val_x, test_x, Y_data, val_y, test_y
+):
 
     global NORMALIZATION_LAYER
 
-    NORMALIZATION_LAYER = 'default'
+    NORMALIZATION_LAYER = "default"
 
-    if normalization_type == 'batch_norm':
-        NORMALIZATION_LAYER = 'batch_norm'
-    elif normalization_type == 'layer_norm':
-        NORMALIZATION_LAYER = 'layer_norm'
-    elif normalization_type == 'instance_norm':
-        NORMALIZATION_LAYER = 'instance_norm'
-    elif normalization_type == 'group_norm':
-        NORMALIZATION_LAYER = 'group_norm'
-    elif normalization_type == 'local_box_cox':
+    if normalization_type == "batch_norm":
+        NORMALIZATION_LAYER = "batch_norm"
+    elif normalization_type == "layer_norm":
+        NORMALIZATION_LAYER = "layer_norm"
+    elif normalization_type == "instance_norm":
+        NORMALIZATION_LAYER = "instance_norm"
+    elif normalization_type == "group_norm":
+        NORMALIZATION_LAYER = "group_norm"
+    elif normalization_type == "local_box_cox":
         for i in range(num_clients):
             print(i)
-            X_data[i] = box_cox(X_data[i],val_x[i],test_x[i])
+            X_data[i] = box_cox(X_data[i], val_x[i], test_x[i])
 
-    elif normalization_type == 'local_yeo_johnson':
+    elif normalization_type == "local_yeo_johnson":
         for i in range(num_clients):
             X_data[i], val_x[i], test_x[i] = yeo_johnson(X_data[i], val_x[i], test_x[i])
 
-    elif normalization_type == 'local_min_max':
+    elif normalization_type == "local_min_max":
         for i in range(num_clients):
             X_data[i], val_x[i], test_x[i] = min_max(X_data[i], val_x[i], test_x[i])
 
-    elif normalization_type == 'local_z_score':
+    elif normalization_type == "local_z_score":
         for i in range(num_clients):
             X_data[i], val_x[i], test_x[i] = z_score(X_data[i], val_x[i], test_x[i])
 
-    elif normalization_type == 'log_scaling':
+    elif normalization_type == "log_scaling":
         for i in range(num_clients):
             X_data[i], val_x[i], test_x[i] = log_scaling(X_data[i], val_x[i], test_x[i])
 
-    elif normalization_type == 'local_robust_scaling':
+    elif normalization_type == "local_robust_scaling":
         for i in range(num_clients):
-            X_data[i], val_x[i], test_x[i] = robust_scaling(X_data[i], val_x[i], test_x[i])
+            X_data[i], val_x[i], test_x[i] = robust_scaling(
+                X_data[i], val_x[i], test_x[i]
+            )
 
-    elif normalization_type == 'global_z_score':
+    elif normalization_type == "global_z_score":
         merged_train = merge(X_data)
         merged_val = merge(val_x)
         merged_test = merge(test_x)
@@ -161,13 +178,15 @@ def do_normalization(normalization_type, num_clients, X_data, val_x, test_x, Y_d
         merged_val_y = merge(val_y)
         merged_test_y = merge(test_y)
 
-        merged_train, merged_val, merged_test = z_score(merged_train, merged_val, merged_test)
+        merged_train, merged_val, merged_test = z_score(
+            merged_train, merged_val, merged_test
+        )
 
         X_data, Y_data = split(X_data, merged_train, merget_train_y)
         val_x, val_y = split(val_x, merged_val, merged_val_y)
         test_x, test_y = split(test_x, merged_test, merged_test_y)
 
-    elif normalization_type == 'global_min_max':
+    elif normalization_type == "global_min_max":
         merged_train = merge(X_data)
         merged_val = merge(val_x)
         merged_test = merge(test_x)
@@ -176,13 +195,15 @@ def do_normalization(normalization_type, num_clients, X_data, val_x, test_x, Y_d
         merged_val_y = merge(val_y)
         merged_test_y = merge(test_y)
 
-        merged_train, merged_val, merged_test = min_max(merged_train, merged_val, merged_test)
+        merged_train, merged_val, merged_test = min_max(
+            merged_train, merged_val, merged_test
+        )
 
         X_data, Y_data = split(X_data, merged_train, merget_train_y)
         val_x, val_y = split(val_x, merged_val, merged_val_y)
         test_x, test_y = split(test_x, merged_test, merged_test_y)
 
-    elif normalization_type == 'global_box_cox':
+    elif normalization_type == "global_box_cox":
         merged_train = merge(X_data)
         merged_val = merge(val_x)
         merged_test = merge(test_x)
@@ -191,13 +212,15 @@ def do_normalization(normalization_type, num_clients, X_data, val_x, test_x, Y_d
         merged_val_y = merge(val_y)
         merged_test_y = merge(test_y)
 
-        merged_train, merged_val, merged_test = box_cox(merged_train, merged_val, merged_test)
+        merged_train, merged_val, merged_test = box_cox(
+            merged_train, merged_val, merged_test
+        )
 
         X_data, Y_data = split(X_data, merged_train, merget_train_y)
         val_x, val_y = split(val_x, merged_val, merged_val_y)
         test_x, test_y = split(test_x, merged_test, merged_test_y)
 
-    elif normalization_type == 'global_robust_scaling':
+    elif normalization_type == "global_robust_scaling":
         merged_train = merge(X_data)
         merged_val = merge(val_x)
         merged_test = merge(test_x)
@@ -206,13 +229,15 @@ def do_normalization(normalization_type, num_clients, X_data, val_x, test_x, Y_d
         merged_val_y = merge(val_y)
         merged_test_y = merge(test_y)
 
-        merged_train, merged_val, merged_test = robust_scaling(merged_train, merged_val, merged_test)
+        merged_train, merged_val, merged_test = robust_scaling(
+            merged_train, merged_val, merged_test
+        )
 
         X_data, Y_data = split(X_data, merged_train, merget_train_y)
         val_x, val_y = split(val_x, merged_val, merged_val_y)
         test_x, test_y = split(test_x, merged_test, merged_test_y)
 
-    elif normalization_type == 'global_yeo_johnson':
+    elif normalization_type == "global_yeo_johnson":
         merged_train = merge(X_data)
         merged_val = merge(val_x)
         merged_test = merge(test_x)
@@ -220,19 +245,22 @@ def do_normalization(normalization_type, num_clients, X_data, val_x, test_x, Y_d
         merget_train_y = merge(Y_data)
         merged_val_y = merge(val_y)
         merged_test_y = merge(test_y)
-        merged_train, merged_val, merged_test = yeo_johnson(merged_train, merged_val, merged_test)
+        merged_train, merged_val, merged_test = yeo_johnson(
+            merged_train, merged_val, merged_test
+        )
 
         X_data, Y_data = split(X_data, merged_train, merget_train_y)
         val_x, val_y = split(val_x, merged_val, merged_val_y)
         test_x, test_y = split(test_x, merged_test, merged_test_y)
 
-    elif normalization_type == 'default':
+    elif normalization_type == "default":
         pass  # default case
 
     else:
         print("error")
 
     return X_data, val_x, test_x, Y_data, val_y, test_y
+
 
 """# Network Model (Dataset Specific)"""
 
@@ -244,10 +272,8 @@ def get_model():
     if NORMALIZATION_LAYER == 'batch_norm':
         model.add(tf.keras.layers.BatchNormalization())
     elif NORMALIZATION_LAYER == 'instance_norm':
-        # Instance normalization is typically not directly supported, hence using GroupNormalization with group size of 1
         model.add(tf.keras.layers.GroupNormalization(groups=1))
     elif NORMALIZATION_LAYER == 'group_norm':
-        # Using an arbitrary group size, adjust based on the number of features or experimentation
         model.add(tf.keras.layers.GroupNormalization(groups=4))
     elif NORMALIZATION_LAYER == 'layer_norm':
         model.add(tf.keras.layers.LayerNormalization())
@@ -261,321 +287,186 @@ def get_model():
 
 """# Flower Client (Dataset Specific)"""
 
-from flwr.common.typing import NDArrays
-class FlowerClient(fl.client.NumPyClient):
-
-    def __init__(self, model: tf.keras.models.Sequential, X_train: np.ndarray, y_train: np.ndarray):
-        self.model = model
-
-        self.X_train = X_train
-        self.y_train = y_train
-
-
-    def get_parameters(self, config):
-        return self.model.get_weights()
-
-
-    def fit(self, parameters: NDArrays, config: Dict[str, Scalar]) -> NDArrays:
-
-        self.model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=LEARNING_RATE), loss='sparse_categorical_crossentropy', metrics=['accuracy'])
-
-        self.model.set_weights(parameters)
-
-        history = self.model.fit(self.X_train, self.y_train ,batch_size=BATCH_SIZE, epochs=1, verbose=0)
-        results = {
-            "loss": history.history["loss"][0],
-            "accuracy": history.history["accuracy"][0],
-        }
-        return self.model.get_weights(), len(self.X_train), results
-
-    def evaluate(self, parameters: NDArrays, config: Dict[str, Scalar])-> Tuple[float, int, Dict[str, Scalar]]:
-        self.model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=LEARNING_RATE), loss='sparse_categorical_crossentropy', metrics=['accuracy'])
-        self.model.set_weights(parameters)
-
-        loss, acc = self.model.evaluate(self.X_train, self.y_train, verbose=0)
-        return loss, len(self.X_train), {"accuracy": acc}
-
-def create_client_fn(cid: str) -> FlowerClient:
-    model = get_model()
-    cid_int = int(cid)
-    return FlowerClient(model, X_trains_fed[cid_int], Y_trains_fed[cid_int])
-
-def weighted_average(metrics: List[Tuple[int, Metrics]]) -> Metrics:
-    accuracies = [num_examples * m["accuracy"] for num_examples, m in metrics]
-    examples = [num_examples for num_examples, _ in metrics]
-
-    # Aggregate and return custom metric (weighted average)
-    return {"accuracy": sum(accuracies) / sum(examples)}
-
-from flwr.server import Server
-from logging import INFO
-from flwr.common.logger import log
-from flwr.server.history import History
-from flwr.server.strategy import Strategy
-from flwr.server.client_manager import ClientManager, SimpleClientManager
-import timeit
-
-class CustomFlowerServer(Server):
-    def __init__(
-        self,
-        *,
-        client_manager: ClientManager,
-        strategy: Optional[Strategy] = None,
-    ) -> None:
-        super().__init__(client_manager=client_manager, strategy=strategy)
-
-
-    # Override
-    def fit(self, num_rounds: int, timeout: Optional[float]) -> History:
-        """Run federated averaging for a number of rounds."""
-        history = History()
-
-        # Initialize parameters
-        log(INFO, "Initializing global parameters")
-        self.parameters = self._get_initial_parameters(timeout=timeout)
-        log(INFO, "Evaluating initial parameters")
-        res = self.strategy.evaluate(0, parameters=self.parameters)
-        if res is not None:
-            log(
-                INFO,
-                "initial parameters (loss, other metrics): %s, %s",
-                res[0],
-                res[1],
-            )
-            history.add_loss_centralized(server_round=0, loss=res[0])
-            history.add_metrics_centralized(server_round=0, metrics=res[1])
-
-        # Run federated learning for num_rounds
-        log(INFO, "FL starting")
-        start_time = timeit.default_timer()
-
-        # Early Stopping Parameters
-        best_loss = float("inf")
-        patience_counter = 0
-        minimum_delta = 0.001  # Example: require at least 0.001 decrease in loss
-
-        for current_round in range(1, num_rounds + 1):
-            # Train model and replace previous global model
-            res_fit = self.fit_round(
-                server_round=current_round,
-                timeout=timeout,
-            )
-            if res_fit is not None:
-                parameters_prime, fit_metrics, _ = res_fit  # fit_metrics_aggregated
-                if parameters_prime:
-                    self.parameters = parameters_prime
-                history.add_metrics_distributed_fit(
-                    server_round=current_round, metrics=fit_metrics
-                )
-
-            # Evaluate model using strategy implementation
-            res_cen = self.strategy.evaluate(current_round, parameters=self.parameters)
-            if res_cen is not None:
-                loss_cen, metrics_cen = res_cen
-                log(
-                    INFO,
-                    "fit progress: (%s, %s, %s, %s)",
-                    current_round,
-                    loss_cen,
-                    metrics_cen,
-                    timeit.default_timer() - start_time,
-                )
-                history.add_loss_centralized(server_round=current_round, loss=loss_cen)
-                history.add_metrics_centralized(
-                    server_round=current_round, metrics=metrics_cen
-                )
-
-            # Evaluate model on a sample of available clients
-            res_fed = self.evaluate_round(server_round=current_round, timeout=timeout)
-            if res_fed is not None:
-                loss_fed, evaluate_metrics_fed, _ = res_fed
-                if loss_fed is not None:
-                    history.add_loss_distributed(
-                        server_round=current_round, loss=loss_fed
-                    )
-                    history.add_metrics_distributed(
-                        server_round=current_round, metrics=evaluate_metrics_fed
-                    )
-
-            if res_cen is not None:
-                loss_cen, metrics_cen = res_cen
-
-                # Check for improvement
-                if loss_cen < best_loss - minimum_delta:
-                    best_loss = loss_cen
-                    patience_counter = 0  # Reset counter if improvement
-                else:
-                    patience_counter += 1
-
-                # Early stopping check
-                if patience_counter >= EARLY_STOPPING_PATIENCE:
-                    log(INFO, "Early stopping triggered at round %s", current_round)
-                    break  # Exit the training loop
-
-        # Bookkeeping
-        end_time = timeit.default_timer()
-        elapsed = end_time - start_time
-        log(INFO, "FL finished in %s", elapsed)
-        return history
 
 # Required for early stopping
-best_accuracy = 0.0
-weights = np.array([])
-best_loss = float("inf")
-minimum_delta = 0.001  # Example: require at least 0.001 decrease in loss
 
-def evaluate(
-    server_round: int,
-    parameters: fl.common.NDArrays,
-    config: Dict[str, fl.common.Scalar],
-    ) -> Optional[Tuple[float, Dict[str, fl.common.Scalar]]]:
-    """Centralized evaluation function"""
 
-    model = get_model()
-    model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=LEARNING_RATE), loss='sparse_categorical_crossentropy' , metrics=['accuracy'])
-
-    model.set_weights(parameters)
-
-    loss, accuracy = model.evaluate(X_val_fed, Y_val_fed, batch_size=BATCH_SIZE, verbose=0)
-
-    global best_accuracy
-    global best_loss
-    global weights
-
-    print(f"LOSS: {loss}")
-    print(f"BEST_LOSS: {best_loss}")
-    print(f"ACCURACY: {accuracy}")
-    print(f"BEST_ACCURACY: {best_accuracy}")
-    print(f"SERVER_ROUND: {server_round}")
-
-    if loss < best_loss - minimum_delta:
-        best_accuracy = accuracy
-        weights = parameters
-        best_loss = loss
-
-    return loss, {"accuracy": accuracy}
-
-from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, classification_report
-def get_results():
-    '''
+def get_results(global_weights):
+    """
     At the end of the federated learning process, calculates results and returns
     Test F1 Score
     Test Loss
     Test Accuracy
     Test Precision
     Test Recall
-    '''
-    global X_test_fed, Y_test_fed, weights
+    """
+    global X_test_fed, Y_test_fed
 
     model = get_model()
-    model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=LEARNING_RATE), loss='sparse_categorical_crossentropy' , metrics=['accuracy'])
-    model.set_weights(weights)
+    model.compile(
+        optimizer=tf.keras.optimizers.Adam(learning_rate=LEARNING_RATE),
+        loss="categorical_crossentropy",
+        metrics=["accuracy"],  # Add accuracy as a metric
+    )
+    model.set_weights(global_weights)
 
-    test_loss, test_accuracy = model.evaluate(X_test_fed, Y_test_fed, batch_size=BATCH_SIZE, verbose=0)
+    test_loss, test_accuracy = model.evaluate(X_test_fed, Y_test_fed, batch_size=BATCH_SIZE, verbose=1)
 
     y_pred_probs = model.predict(X_test_fed)
     y_pred = np.argmax(y_pred_probs, axis=1)
-    # If y_test is one-hot encoded, convert it back to integer labels
-    if len(Y_test_fed.shape) > 1:
-        Y_test_fed = np.argmax(Y_test_fed, axis=1)
+         
+    f1 = f1_score(Y_test_fed.argmax(axis=1), y_pred, average="weighted", zero_division=1)
+    precision = precision_score(Y_test_fed.argmax(axis=1), y_pred,average="weighted", zero_division=1)
+    recall = recall_score(Y_test_fed.argmax(axis=1), y_pred,average="weighted", zero_division=1)
+    print(classification_report(Y_test_fed.argmax(axis=1),y_pred))
+    
+    return test_accuracy, test_loss, f1, precision, recall
 
-    # Calculate metrics
-    precision = precision_score(Y_test_fed, y_pred, average='weighted')
-    recall = recall_score(Y_test_fed, y_pred, average='weighted')
-    f1 = f1_score(Y_test_fed, y_pred, average='weighted')
-
-    return test_accuracy, precision, recall, f1, test_loss
+def exponential_lr_decay(current_epoch,decay_rate=0.01):
+    return LEARNING_RATE # float(LEARNING_RATE * math.exp(-decay_rate * current_epoch))
 
 def federated_train(x, y, num_clients):
+    global X_val_fed, Y_val_fed, best_f1, best_acc, best_loss
+    
+    total_samples = sum([len(data) for data in x])
 
-    global X_trains_fed
-    global Y_trains_fed
-    X_trains_fed = x
-    Y_trains_fed = y
+    client_sample_weights = [len(data) / total_samples for data in x]
 
-    client_resources = {"num_cpus": 2}
-    if tf.config.get_visible_devices("GPU"):
-        client_resources["num_gpus"] = 1
+    model = get_model()
+    optimizer = tf.keras.optimizers.Adam()
+    model.compile(
+        optimizer=optimizer,
+        loss="categorical_crossentropy",
+    )   
 
-    # Specify the Strategy
-    strategy = fl.server.strategy.FedAvg(
-        fraction_fit=1.0,  # Sample 100% of available clients for training
-        fraction_evaluate=1.0,
-        min_fit_clients=num_clients,
-        min_evaluate_clients=num_clients,
-        min_available_clients=num_clients,  # Wait until all 8 clients are available
-        evaluate_metrics_aggregation_fn=weighted_average,
-        evaluate_fn=evaluate
-    )
+    # Initialize global weights
+    global_weights = model.get_weights()
 
-    # Start simulation
-    history = fl.simulation.start_simulation(
-        client_fn=create_client_fn,
-        num_clients=num_clients,
-        config=fl.server.ServerConfig(num_rounds=EPOCH),
-        server=CustomFlowerServer(client_manager=SimpleClientManager(),
-        strategy=strategy
-        ),
-        client_resources=client_resources,
-        actor_kwargs={
-            "on_actor_init_fn": enable_tf_gpu_growth  # Enable GPU growth upon actor init
-            # does nothing if `num_gpus` in client_resources is 0.0
-        },
-    )
-
-    accuracy, precision, recall, f1, test_loss = get_results()
-
-    return history, accuracy, precision, recall, f1, test_loss
-
-"""# Training and Saving the Results"""
-
-import wandb
-
-wandb.login()
-
-sweep_config = {
-    'method': 'grid'
+    # Initialize history and early stopping parameters
+    history = {
+        "val_loss": [],
+        "val_acc": [],
+        "val_f1": [],
+        "distributed_train_loss": [],
+        "centralized_train_loss": [],
+        "centralized_train_acc": []
     }
+    patience_counter = 0
 
-metric = {
-    'name': 'val_loss',
-    'goal': 'minimize'
-    }
+    for epoch in range(EPOCH):
+        client_weights = [np.zeros_like(layer) for layer in global_weights]
+        client_train_losses = []
 
-sweep_config['metric'] = metric
+        # Training for each client
+        for i in range(num_clients):
+            
+            model.set_weights(global_weights)
+            
+            optimizer.learning_rate.assign(exponential_lr_decay(current_epoch=epoch))
+            
+            history_per_client = model.fit(x[i], y[i], batch_size=BATCH_SIZE, epochs=1, verbose=0)
+            client_train_losses.append(history_per_client.history["loss"][-1])
+            client_weights = [
+                cw + fw for cw, fw in zip(client_weights, fedavg_per_client(model.get_weights(), client_sample_weights[i]))
+            ]            
+        # Calculate distributed training loss (average of client losses)
+        avg_train_loss = np.mean(client_train_losses)
+        history["distributed_train_loss"].append(avg_train_loss)
 
-parameters_dict = {
-    'b_skew': {
-          'values': ['default', 'feature_0.3', 'feature_0.7', 'label_5.0', 'label_0.5', 'quantity_5.0', 'quantity_0.7']
-        },
-    'a_num_clients': {
-          'values': [10,20, 30]
-        },
-    'c_normalization': {
-          'values': ['local_z_score', 'local_min_max', 'batch_norm', 'layer_norm', 'group_norm', 'instance_norm', 'local_robust_scaling',
-                     'global_z_score', 'global_min_max','global_robust_scaling',
-                     'default']
-        }
-    }
+        global_weights = [np.copy(layer) for layer in client_weights]
 
-sweep_config['parameters'] = parameters_dict
+        # Set global weights for the global model
+        model.set_weights(global_weights)
+        model.compile(
+            optimizer=tf.keras.optimizers.Adam(learning_rate=LEARNING_RATE),
+            loss="categorical_crossentropy",
+            metrics=["accuracy"],  # Add accuracy as a metric
+        )
 
-parameters_dict.update({
-    'dataset': {
-        'value': 'hepatisis'},
-    'experiment_run': {
-        'value': '1'}
-    })
+        # Evaluate centralized training loss (global model on all client training data)
+        combined_x = np.concatenate(x, axis=0)
+        combined_y = np.concatenate(y, axis=0)
+        centralized_train_loss, centralized_train_acc = model.evaluate(
+            combined_x, combined_y, batch_size=BATCH_SIZE, verbose=0
+        )
+        history["centralized_train_loss"].append(centralized_train_loss)
+        history["centralized_train_acc"].append(centralized_train_acc)
 
-import time
+        val_loss, val_acc = model.evaluate(
+            X_val_fed, Y_val_fed, batch_size=BATCH_SIZE, verbose=0
+        )
+        
+        y_pred_probs = model.predict(X_val_fed)
+        y_pred = np.argmax(y_pred_probs, axis=1)
+        
+        
+        print("Pred Shape", y_pred.shape)
+        print("Val Y Shape", Y_val_fed.shape)
+        
+        val_f1 = f1_score(Y_val_fed.argmax(axis=1), y_pred, average="weighted", zero_division=1)
 
-def train(config = None):
+        # Store validation metrics in history
+        history["val_loss"].append(val_loss)
+        history["val_acc"].append(val_acc)
+        history["val_f1"].append(val_f1)
+        
+        print(f"Epoch {epoch + 1} Results:")
+        print(f"  Distributed Train Loss: {avg_train_loss}")
+        print(f"  Centralized Train Loss: {centralized_train_loss}")
+        print(f"  Validation Loss: {val_loss}")
+        print(f"  Validation Acc: {val_acc}")
+        print(f"  Validation F1: {val_f1}")
+        
+        # Early stopping logic
+        if val_loss < best_loss - 0.00001:
+            best_loss = val_loss
+            best_f1 = val_f1
+            best_acc = val_acc
+            patience_counter = 0
+        else:
+            patience_counter += 1
+            if patience_counter >= EARLY_STOPPING_PATIENCE:
+                print(f"Early stopping at epoch {epoch + 1}")
+                break
+        
+        del client_weights    
+        gc.collect()
+        
+
+    test_accuracy, test_loss, f1, precision, recall = get_results(global_weights)
+    del global_weights
+    return history, test_accuracy, test_loss, f1, precision, recall
+
+
+def fedavg(client_weights, client_sample_weights):
+    weighted_avg_weights = []
+    for layer in range(len(client_weights[0])):
+        weighted_layer = sum(
+            client_sample_weights[i] * client_weights[i][layer]
+            for i in range(len(client_weights))
+        )
+        weighted_avg_weights.append(weighted_layer)
+
+    return weighted_avg_weights
+
+
+def fedavg_per_client(client_weights, client_sample_weight):
+    return [client_sample_weight * layer for layer in client_weights]
+
+
+
+def train(config=None):
     with wandb.init(config=config):
 
         config = wandb.config
         tf.keras.backend.clear_session()
+        gc.collect()
+        
+        gpus = tf.config.experimental.list_physical_devices('GPU')
+        for gpu in gpus:
+            tf.config.experimental.set_memory_growth(gpu, True)
+            
 
-        global NUM_CLIENTS
         global X_test_fed
         global Y_test_fed
 
@@ -583,17 +474,26 @@ def train(config = None):
         global Y_val_fed
 
 
-        NUM_CLIENTS = config['a_num_clients']
-
         load_data()
 
-        clientsData, clientLabels = do_skew(config['b_skew'], config['a_num_clients'], X_trains_fed, Y_trains_fed)
+        clientsData, clientLabels = do_skew(
+            config["b_skew"], config["a_num_clients"], X_trains_fed, Y_trains_fed
+        )
         val_x, val_y = split(clientsData, X_val_fed, Y_val_fed)
         test_x, test_y = split(clientsData, X_test_fed, Y_test_fed)
 
-        #validation and test datasets are normalized with same parameters train dataset is normalized.
-        #Data distribution among clients are protected, for local normalization, val and test datasets are normalized with respect to their local train data normalization parameters.
-        normalizedData, val_x, test_x, clientLabels, val_y, test_y = do_normalization(config['c_normalization'], config['a_num_clients'], clientsData, val_x, test_x, clientLabels, val_y, test_y)
+        # validation and test datasets are normalized with same parameters train dataset is normalized.
+        # Data distribution among clients are protected, for local normalization, val and test datasets are normalized with respect to their local train data normalization parameters.
+        normalizedData, val_x, test_x, clientLabels, val_y, test_y = do_normalization(
+            config["c_normalization"],
+            config["a_num_clients"],
+            clientsData,
+            val_x,
+            test_x,
+            clientLabels,
+            val_y,
+            test_y,
+        )
 
         X_val_fed = merge(val_x)
         Y_val_fed = merge(val_y)
@@ -603,73 +503,191 @@ def train(config = None):
 
         t1 = time.perf_counter(), time.process_time()
 
-        history, test_accuracy, test_precision, test_recall, test_f1, test_loss = federated_train(normalizedData, clientLabels, config['a_num_clients'])
+        # Call the federated_train function
+        history, test_accuracy, test_loss, f1, precision, recall = federated_train(
+            normalizedData, clientLabels, config["a_num_clients"]
+        )
+        print("Test Results:",test_accuracy, test_loss, f1, precision, recall)
 
         t2 = time.perf_counter(), time.process_time()
-
         t = t2[1] - t1[1]
 
-        global best_accuracy, weights, best_loss
+        # Use global variables for best metrics and weights
+        global best_f1, best_acc, global_weights, best_loss
 
+        # Determine early-stopped epoch based on validation loss history
+        early_stopped_epoch = (
+            len(history["centralized_train_loss"]) - EARLY_STOPPING_PATIENCE - 1
+            if len(history["centralized_train_loss"]) < EPOCH + 1
+            else len(history["centralized_train_loss"]) - 1
+        )
 
-        if (len(history.losses_centralized) == EPOCH + 1):
-            early_stopped_epoch = len(history.losses_centralized) - 1
-        else:
-            early_stopped_epoch = len(history.losses_centralized) - EARLY_STOPPING_PATIENCE - 1
-
-        # Saving the results
+        # Log time and results to WandB
         wandb.log({"time": t})
         wandb.log({"stopped_epoch": early_stopped_epoch})
-        wandb.log({"test_accuracy": test_accuracy})
-        wandb.log({"test_precision": test_precision})
-        wandb.log({"test_recall": test_recall})
-        wandb.log({"test_f1": test_f1})
         wandb.log({"test_loss": test_loss})
+        wandb.log({"test_acc": test_accuracy})
+        wandb.log({"test_f1": f1})
+        wandb.log({"test_precision": precision})
+        wandb.log({"test_recall": recall})
         wandb.log({"validation_loss": best_loss})
-        wandb.log({"validation_accuracy": best_accuracy})
+        wandb.log({"validation_f1": best_f1})
+        wandb.log({"validation_acc": best_acc})
+        
 
-
-        table = wandb.Table(data=history.losses_distributed, columns=["x", "y"])
+        # Log distributed and centralized losses
+        distributed_loss_table = wandb.Table(
+            data=[
+                [i, loss] for i, loss in enumerate(history["distributed_train_loss"])
+            ],
+            columns=["Epoch", "Distributed Loss"],
+        )
         wandb.log(
             {
                 "distributed_loss": wandb.plot.line(
-                    table, "x", "y", title="Train Set Loss vs Epoch Plot"
+                    distributed_loss_table,
+                    "Epoch",
+                    "Distributed Loss",
+                    title="Distributed Training Loss vs Epoch",
                 )
             }
         )
 
-
-        table2 = wandb.Table(data=history.losses_centralized, columns=["x", "y"])
+        centralized_loss_table = wandb.Table(
+            data=[
+                [i, loss] for i, loss in enumerate(history["centralized_train_loss"])
+            ],
+            columns=["Epoch", "Centralized Loss"],
+        )
         wandb.log(
             {
                 "centralized_loss": wandb.plot.line(
-                    table2, "x", "y", title="Validation Set Loss vs Epoch Plot"
+                    centralized_loss_table,
+                    "Epoch",
+                    "Centralized Loss",
+                    title="Centralized Training Loss vs Epoch",
                 )
             }
         )
-
-        table3 = wandb.Table(data=history.metrics_distributed['accuracy'], columns=["x", "y"])
-        wandb.log(
-            {
-                "distributed_accuracy": wandb.plot.line(
-                    table3, "x", "y", title="Train Set Accuracy vs Epoch Plot"
-                )
-            }
+        
+        centralized_acc_table = wandb.Table(
+            data=[
+                [i, loss] for i, loss in enumerate(history["centralized_train_acc"])
+            ],
+            columns=["Epoch", "Centralized Accuracy"],
         )
-
-        table4 = wandb.Table(data=history.metrics_centralized['accuracy'], columns=["x", "y"])
         wandb.log(
             {
                 "centralized_accuracy": wandb.plot.line(
-                    table4, "x", "y", title="Validation Set Accuracy vs Epoch Plot"
+                    centralized_acc_table,
+                    "Epoch",
+                    "Centralized Accuracy",
+                    title="Centralized Training Accuracy vs Epoch",
                 )
             }
         )
 
-        best_accuracy = 0.0
-        weights = np.array([])
+        # Log validation metrics
+        validation_loss_table = wandb.Table(
+            data=[[i, loss] for i, loss in enumerate(history["val_loss"])],
+            columns=["Epoch", "Validation Loss"],
+        )
+        wandb.log(
+            {
+                "validation_loss": wandb.plot.line(
+                    validation_loss_table,
+                    "Epoch",
+                    "Validation Loss",
+                    title="Validation Loss vs Epoch",
+                )
+            }
+        )
+
+        validationf1_table = wandb.Table(
+            data=[[i, r2] for i, r2 in enumerate(history["val_f1"])],
+            columns=["Epoch", "Validation F!1"],
+        )
+        wandb.log(
+            {
+                "validation_f1": wandb.plot.line(
+                    validationf1_table,
+                    "Epoch",
+                    "Validation F1",
+                    title="Validation F1 vs Epoch",
+                )
+            }
+        )
+
+        best_f1 = 0.0
+        best_acc = 0.0
+        global_weights = np.array([])
         best_loss = float("inf")
 
 
-wandb.agent(sweep_id, train)
-wandb.agent(sweep_id, project="PROJECT_NAME", function=train)
+def parse_arguments():
+    parser = argparse.ArgumentParser(
+        description="Run WandB sweep with custom sweep_id and project name."
+    )
+    parser.add_argument("--sweep_id", type=str, required=False, help="WandB Sweep ID")
+    parser.add_argument("--project", type=str, required=True, help="WandB Project Name")
+    parser.add_argument("--run",type=int, required=True,help="Run Count")
+    return parser.parse_args()
+
+
+if __name__ == "__main__":
+    args = parse_arguments()
+    initialize_globals()
+    
+    gc.collect()
+
+    sweep_config = {"method": "grid"}
+
+    metric = {"name": "val_loss", "goal": "minimize"}
+
+    sweep_config["metric"] = metric
+
+    parameters_dict = {
+        "b_skew": {
+            "values": [
+                "default",
+                "feature_0.3",
+                "feature_0.7",
+                "label_5.0",
+                "label_0.5",
+                "quantity_5.0",
+                "quantity_0.7",
+            ]
+        },
+        "a_num_clients": {"values": [10, 20, 30]},
+        "c_normalization": {
+            "values": [
+                "local_yeo_johnson",
+                "global_yeo_johnson",
+                'local_z_score',
+                'local_min_max',
+                'batch_norm',
+                'layer_norm',
+                'group_norm',
+                'instance_norm',
+                'local_robust_scaling',
+                'global_z_score',
+                'global_min_max',
+                'global_robust_scaling',
+                'default'
+            ]
+        },
+    }
+
+    sweep_config["parameters"] = parameters_dict
+
+    parameters_dict.update(
+        {"dataset": {"value": "hepatitis"}, "experiment_run": {"value": f"{args.run}"}}
+    )
+
+    sweep_id = wandb.sweep(sweep_config, project=args.project)
+
+    if not args.sweep_id:
+        args.sweep_id = sweep_id
+
+    # Initialize WandB sweep with provided sweep_id and project name
+    wandb.agent(args.sweep_id, project=args.project, function=train)
