@@ -17,13 +17,17 @@ This directory includes the code used to run the experiments. Each dataset has i
   - Weights & Biases project creation and changing the project name in the code
   - Weights & Biases API login credentials
   - Dataset paths
-- Datasets are **not** included in this repository. Please download them from their official sources and update the dataset path variables in the code accordingly.
-- A `requirements.yml` file is provided to set up the Python environment. You can create a conda environment using:
+- Datasets are included in the respective directory. Modify the dataset path accordingly.
+- A `requirements_image.yml`  and `requirements_tabular.txt` files are provided to set up the Python environments. For MNIST and CIFAR-10 experiments you can use  `requirements_image.yml` and for other datasets you can use `requirements_tabular.txt`. You can create a environments using respectively:
 
 ```bash
 conda env create -f requirements.yml
 ```
 
+```bash
+pip install -r requirements.txt
+```
+To run feature imbalanced experiments, you should fill the numerical features arrays in the `skew.py` with the features you want to create imbalance. We have excluded categorical features while doing the experiments.
 ## 📁 Privacy Implementations
 
 This directory contains proof-of-concept implementations of our proposed privacy-preserving federated normalization techniques. It includes simulations for each normalization technique discussed in the paper.
