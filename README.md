@@ -27,7 +27,7 @@ conda env create -f requirements.yml
 ```bash
 pip install -r requirements.txt
 ```
-To run feature imbalanced experiments, you should fill the numerical features arrays in the `skew.py` with the features you want to create imbalance. We have excluded categorical features while doing the experiments.
+To run feature imbalanced experiments on tabular datasets, you should fill the numerical features arrays in the `skew.py` with the features you want to create imbalance. We have excluded categorical features while doing the experiments.
 ## 📁 Privacy Implementations
 
 This directory contains proof-of-concept implementations of our proposed privacy-preserving federated normalization techniques. It includes simulations for each normalization technique discussed in the paper.
