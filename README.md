@@ -18,7 +18,7 @@ This directory includes the code used to run the experiments. Each dataset has i
   - Weights & Biases API login credentials
   - Dataset paths
 - Datasets are included in the respective directory. Modify the dataset path accordingly.
-- A `requirements_image.yml`  and `requirements_tabular.txt` files are provided to set up the Python environments. For MNIST and CIFAR-10 experiments you can use  `requirements_image.yml` and for other datasets you can use `requirements_tabular.txt`. You can create a environments using respectively:
+- `requirements_image.yml`  and `requirements_tabular.txt` files are provided to set up the Python environments. For MNIST and CIFAR-10 experiments you can use  `requirements_image.yml` and for other datasets you can use `requirements_tabular.txt`. You can create a environments using respectively:
 
 ```bash
 conda env create -f requirements.yml
